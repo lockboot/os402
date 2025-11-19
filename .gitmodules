@@ -1,0 +1,6 @@
+[submodule "dependencies/reqwest"]
+	path = dependencies/reqwest
+	url = https://github.com/HarryR/reqwest-no-tls12.git
+[submodule "dependencies/lockboot"]
+	path = dependencies/lockboot
+	url = https://github.com/lockboot/lockboot.git

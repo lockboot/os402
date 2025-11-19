@@ -1,0 +1,18 @@
+[build]
+target = "x86_64-unknown-linux-musl"
+
+# x86_64 Linux (musl for static linking)
+[target.x86_64-unknown-linux-musl]
+linker = "rust-lld"
+rustflags = [
+    "-C", "target-feature=+crt-static",
+    "-C", "link-arg=-static",
+]
+
+# ARM64 Linux (musl for static linking)
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"
+rustflags = [
+    "-C", "target-feature=+crt-static",
+    "-C", "link-arg=-static",
+]
