@@ -1,0 +1,8 @@
+# Generated test artifacts
+*.pyz
+*.log
+*.json
+*.bin
+
+# Runtime binaries (downloaded/extracted)
+runtime/

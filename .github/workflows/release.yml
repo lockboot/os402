@@ -1,0 +1,199 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v0.1.0, v1.0.0, etc.
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+          - arch: aarch64  # Also works on Android via adb shell or Termux
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          submodules: true
+
+      - name: Install documentation tools
+        if: (runner.arch == 'X64' && matrix.arch == 'x86_64') || (runner.arch == 'ARM64' && matrix.arch == 'aarch64')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pandoc \
+            texlive-latex-base \
+            texlive-latex-recommended \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            lmodern
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+          profile: minimal
+  
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5 # v2.8.2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Verify Cargo.lock exists
+        run: |
+          if [ ! -f Cargo.lock ]; then
+            echo "ERROR: Cargo.lock not found!"
+            echo "Release branches must have a committed Cargo.lock file."
+            echo "Please run 'cargo generate-lockfile' and commit the result."
+            exit 1
+          fi
+          echo "Cargo.lock found ✓"
+
+      - name: Fetch dependencies
+        run: cargo fetch --target ${{ matrix.target }}
+
+      - name: Build binaries and tests
+        run: |
+          cargo build --release --target ${{ matrix.target }} --bin os402 --bin x402-utils --tests
+          cp target/${{ matrix.target }}/release/x402-utils x402-utils.${{ matrix.arch }}
+          cp target/${{ matrix.target }}/release/os402 os402.${{ matrix.arch }}
+          chmod +x os402.${{ matrix.arch }} x402-utils.${{ matrix.arch }}
+
+      - name: Run tests
+        if: (runner.arch == 'X64' && matrix.arch == 'x86_64') || (runner.arch == 'ARM64' && matrix.arch == 'aarch64')
+        run: make -C test
+        env:
+          BUILD_TYPE: release
+          ARCH: ${{ matrix.arch }}
+
+      - name: Build PDF manual
+        if: (runner.arch == 'X64' && matrix.arch == 'x86_64') || (runner.arch == 'ARM64' && matrix.arch == 'aarch64')
+        run: make -C test HELP.pdf
+        env:
+          BUILD_TYPE: release
+          ARCH: ${{ matrix.arch }}
+
+      - name: Upload HELP.md as artifact
+        if: (runner.arch == 'X64' && matrix.arch == 'x86_64') || (runner.arch == 'ARM64' && matrix.arch == 'aarch64')
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: help-${{ matrix.arch }}.md
+          path: test/HELP.md
+          if-no-files-found: error
+
+      - name: Upload HELP.pdf as artifact
+        if: (runner.arch == 'X64' && matrix.arch == 'x86_64') || (runner.arch == 'ARM64' && matrix.arch == 'aarch64')
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: help-${{ matrix.arch }}.pdf
+          path: test/HELP.pdf
+          if-no-files-found: error
+
+      - name: Attest os402 executable
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-path: os402.${{ matrix.arch }}
+
+      - name: Attest x402-utils executable
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-path: x402-utils.${{ matrix.arch }}
+
+      - name: Upload os402 binary as artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: os402.${{ matrix.arch }}
+          path: os402.${{ matrix.arch }}
+          if-no-files-found: error
+
+      - name: Upload x402-utils binary as artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: x402-utils.${{ matrix.arch }}
+          path: x402-utils.${{ matrix.arch }}
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
+        with:
+          path: artifacts
+
+      - name: Display structure of downloaded files
+        run: ls -R artifacts
+
+      - name: Prepare release assets
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p release-assets
+
+          # Copy os402 binaries with version in filename
+          cp artifacts/os402.x86_64/os402.x86_64 "release-assets/os402.${VERSION}.x86_64"
+          cp artifacts/os402.aarch64/os402.aarch64 "release-assets/os402.${VERSION}.aarch64"
+
+          # Copy manuals with version in filename
+          # Artifacts are in artifacts/help-{arch}.pdf/HELP.pdf structure
+          cp artifacts/help-x86_64.pdf/HELP.pdf "release-assets/os402-${VERSION}-manual.pdf"
+          cp artifacts/help-x86_64.md/HELP.md "release-assets/os402-${VERSION}-manual.md"
+          ls -lh release-assets/
+
+      - name: Build MCPB package
+        run: |
+          # Set up directory structure that build.sh expects
+          mkdir -p target/x86_64-unknown-linux-musl/release
+          mkdir -p target/aarch64-unknown-linux-musl/release
+          cp artifacts/x402-utils.x86_64/x402-utils.x86_64 target/x86_64-unknown-linux-musl/release/x402-utils
+          cp artifacts/x402-utils.aarch64/x402-utils.aarch64 target/aarch64-unknown-linux-musl/release/x402-utils
+
+          # Run the build script
+          chmod +x mcpb/build.sh
+          ./mcpb/build.sh
+
+          # Copy to release assets
+          cp mcpb/build/*.mcpb release-assets/
+          ls -lh release-assets/
+
+      - name: Attest MCPB package
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-path: release-assets/*.mcpb
+
+      - name: Create Release
+        uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2.4.2
+        with:
+          files: release-assets/*
+          draft: false
+          prerelease: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true

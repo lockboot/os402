@@ -1,0 +1,13 @@
+*.log
+*.pid
+*.txt
+*.json
+*.dot
+HELP.md
+node_modules
+pnpm-lock.yaml
+server.ready
+*.pdf
+*.swp
+lineno.tex
+.exec-cache/
