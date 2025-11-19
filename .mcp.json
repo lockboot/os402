@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "x402": {
+      "command": "/src/target/x86_64-unknown-linux-musl/debug/os402",
+      "args": [
+        "--max", "1.0",
+        "-@", "http://localhost:3000",
+        "mcp",
+        "serve"
+      ],
+      "env": {
+        "RUST_LOG": "warn"
+      }
+    }
+  }
+}
